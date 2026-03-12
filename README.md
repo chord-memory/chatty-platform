@@ -1,10 +1,18 @@
 # chatty
+
 Chatty Backend experimentation
 
-## Local Setup (Docker-based)
+## Requirements
+
+- Python 3.11
+- Poetry 2.2.0 (or compatible 2.2.x)
+- Docker (recent stable version)
+- GNU Make
+
+## Run the app (Docker)
 
 ```bash
-# Build the image (installs Python 3.11 + Poetry + deps inside the image)
+# Build the image chatty-backend:local
 make build
 
 # Run the local server on http://localhost:8000
@@ -14,16 +22,16 @@ make run
 # http://localhost:8000/docs
 ```
 
-## Testing (via Docker)
+## Run tests (Poetry)
 
 ```bash
-# Unit / integration tests (pytest under Docker)
-make test
+# Unit tests
+make test-unit
 
 # REST + Socket.IO smoke tests
 make test-smoke
 
-# Run all of the above
+# Run all tests
 make test-all
 ```
 
