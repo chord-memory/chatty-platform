@@ -1,30 +1,30 @@
 # chatty
 Chatty Backend experimentation
 
-# Local Setup
-```bash
-# However you like to set Python 3.11 and poetry 2.2.0
-cd app
-poetry install
+## Local Setup (Docker-based)
 
-# To run the local server (from app directory)
-poetry run python run.py
+```bash
+# Build the image (installs Python 3.11 + Poetry + deps inside the image)
+make build
+
+# Run the local server on http://localhost:8000
+make run
 
 # To see lovely docs in your browser:
 # http://localhost:8000/docs
 ```
 
-# Testing
+## Testing (via Docker)
+
 ```bash
-# Unit tests
-cd app  # if needed  
-poetry run pytest -W ignore
+# Unit / integration tests (pytest under Docker)
+make test
 
-# Basic RestAPI smoke test with server running locally, from /app
-poetry run pytest .\tests_smoke\smoke_test.py
+# REST + Socket.IO smoke tests
+make test-smoke
 
-# Basic SocketIO smoke test with server running locally, from /app
-poetry run pytest .\tests_smoke\smoke_socketio.py
+# Run all of the above
+make test-all
 ```
 
 # To Do / To Discuss:
