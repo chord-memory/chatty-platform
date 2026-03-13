@@ -1,0 +1,45 @@
+### Build stage: install deps (main + dev) and create project-local venv
+FROM python:3.11-slim AS build
+
+ARG POETRY_VERSION=2.2.0
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    POETRY_VERSION=${POETRY_VERSION} \
+    POETRY_VIRTUALENVS_IN_PROJECT=true
+
+RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+
+WORKDIR /app
+
+# Install all dependencies (main + dev) for running tests
+COPY pyproject.toml poetry.lock ./
+
+RUN poetry install --no-root --with dev
+
+
+### Runtime stage: slim image with Python, deps, app code, and tests
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
+
+# Install curl for simple HTTP health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy virtualenv from build image
+COPY --from=build /app/.venv /app/.venv
+
+# Copy application source and tests from build context
+COPY app/ .
+COPY tests/ ./tests/
+
+# Use shell ENTRYPOINT
+RUN chmod +x ./tests/entrypoint.sh
+ENTRYPOINT ["./tests/entrypoint.sh"]
+
+# Default test target
+ENV TEST_TARGET="tests/unit"

@@ -4,12 +4,10 @@ Chatty Backend experimentation
 
 ## Requirements
 
-- Python 3.11
-- Poetry 2.2.0 (or compatible 2.2.x)
 - Docker (recent stable version)
 - GNU Make
 
-## Run the app (Docker)
+## Run the app
 
 ```bash
 # Build the image chatty-backend:local
@@ -22,7 +20,7 @@ make run
 # http://localhost:8000/docs
 ```
 
-## Run tests (Poetry)
+## Run tests
 
 ```bash
 # Unit tests
