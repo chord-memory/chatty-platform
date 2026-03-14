@@ -10,7 +10,7 @@ Chatty Backend experimentation
 ## Run the app
 
 ```bash
-# Build the image chatty-backend:local
+# Build the image chatty-backend:latest
 make build
 
 # Run the local server on http://localhost:8000

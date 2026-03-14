@@ -38,7 +38,7 @@ async def join(sid, data):
         chatroom_id = data.get('chatroom_id')
         
         if not user_id or not chatroom_id:
-            await sio.emit('error', {'message': 'user_id and chatroom_id are required'}, room=sid)
+            await emit_error({'message': 'user_id and chatroom_id are required'}, sid)
             return
         
         # Join the room using chatroom_id as the room identifier
@@ -51,7 +51,7 @@ async def join(sid, data):
     except Exception as e:
         # TODO: Implement proper error handling for Socket.IO events
         logger.error(f"Error in join event: {e}")
-        await sio.emit('error', {'message': 'An error occurred'}, room=sid)
+        await emit_error({'message': 'An error occurred'}, sid)
 
 @sio.event
 async def leave(sid, data):
@@ -61,7 +61,7 @@ async def leave(sid, data):
         chatroom_id = data.get('chatroom_id')
         
         if not user_id or not chatroom_id:
-            await sio.emit('error', {'message': 'user_id and chatroom_id are required'}, room=sid)
+            await emit_error({'message': 'user_id and chatroom_id are required'}, sid)
             return
         
         # Leave the room
@@ -69,12 +69,16 @@ async def leave(sid, data):
         logger.info(f"Client {sid} (user {user_id}) left chatroom {chatroom_id}")
         
         # Acknowledge the leave
-        await sio.emit('left', {'chatroom_id': chatroom_id}, room=sid)
+        await emit_left({'chatroom_id': chatroom_id}, sid)
         
     except Exception as e:
         # TODO: Implement proper error handling for Socket.IO events
         logger.error(f"Error in leave event: {e}")
-        await sio.emit('error', {'message': 'An error occurred'}, room=sid)
+        await emit_error({'message': 'An error occurred'}, sid)
+
+# Socket.IO error helper
+async def emit_error(error_payload, room):
+    await sio.emit("error", error_payload, room=room)
 
 app = FastAPI(
     title="Chatty Backend",

@@ -1,0 +1,139 @@
+Add observability to this FastAPI + Socket.IO backend using Prometheus and Grafana.
+
+Goals
+-----
+
+1. Use `prometheus_fastapi_instrumentator` to expose basic FastAPI metrics.
+2. Use `prometheus_client` to expose custom metrics for the Socket.IO server.
+3. Run Prometheus and Grafana locally using docker-compose.
+4. Create Grafana dashboards for both FastAPI and Socket.IO metrics.
+
+FastAPI Metrics
+---------------
+
+Use `prometheus_fastapi_instrumentator` to expose standard metrics at:
+
+/metrics
+
+This should include:
+- request latency
+- request count
+- error rate
+- request size
+- response size
+
+Socket.IO Metrics
+-----------------
+
+Use `prometheus_client` to track:
+
+Counters:
+- socketio_connections_total
+- socketio_disconnections_total
+- socketio_room_joins_total{room}
+- socketio_room_leaves_total{room}
+- socketio_messages_total{room}
+- socketio_errors_total
+
+Gauges:
+- socketio_active_connections
+- socketio_room_members{room}
+
+Update these metrics inside the Socket.IO event handlers: connect, disconnect, join, leave.
+Update error and messages event metrics where they are emitted in main.py and messages.py.
+
+Expose these metrics through the same `/metrics` endpoint.
+
+Ensure room metrics use Prometheus labels instead of creating separate metrics.
+Example:
+socketio_room_members{room="general"} 5
+
+Docker Compose
+--------------
+
+Add a docker-compose.yml that runs:
+
+- chatty-backend
+- prometheus
+- grafana
+
+Requirements:
+
+Prometheus
+- Runs on port 9090
+- Scrapes the backend `/metrics` endpoint
+- Config file stored at `./prometheus/prometheus.yml`
+- Mount volume: ./prometheus/prometheus.yml
+
+Grafana
+- Runs on port 3000
+- Provision dashboards automatically
+- Add `./grafana/provisioning/datasources/prometheus.yml` to add Prometheus as datasource
+- Add `./grafana/provisioning/dashboards/dashboards.yml` to load dashboards
+- Mount volumes:
+
+./grafana/dashboards
+./grafana/provisioning
+
+Dashboards
+----------
+
+Add two JSON dashboards in `./grafana/dashboards`:
+
+1. FastAPI observability dashboard
+   Use this JSON dashboard as a starting point:
+   https://github.com/KenMwaura1/Fast-Api-Grafana-Starter/blob/main/grafana_data/FastAPI%20Observability-1738340545381.json
+
+2. Socket.IO dashboard showing:
+   - active connections
+   - connections/sec
+   - messages/sec
+   - joins/leaves
+   - room membership by room
+
+Makefile
+--------
+
+Update the Makefile so that:
+
+make run
+
+starts the full local environment using docker-compose.
+
+README
+------
+
+Update the README with instructions for:
+
+Accessing the UIs
+
+Prometheus:
+http://localhost:9090
+
+Grafana:
+http://localhost:3000
+
+Default Grafana login:
+admin / admin
+
+Structure
+---------
+
+Add any new directories required:
+
+prometheus/
+grafana/
+grafana/dashboards/
+grafana/provisioning/
+grafana/provisioning/dashboards
+grafana/provisioning/datasources
+
+Keep changes minimal and consistent with the existing project structure.
+
+CLAUDE.md
+---------
+
+Update CLAUDE.md to reflect new observability stack:
+- prometheus metrics endpoint /metrics
+- docker-compose services for Prometheus and Grafana
+- volumes for dashboards and provisioning

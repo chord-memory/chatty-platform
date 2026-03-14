@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Guidelines:
+- Use Python 3.11
+- Prefer async functions
+- Do not introduce new frameworks
+- Keep dependencies minimal
+- Use docker-compose for local development
+- Run `make test-all` before finishing tasks
+
 ## Commands
 
 All commands assume you are in the repo root unless otherwise noted.
