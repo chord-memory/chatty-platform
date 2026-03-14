@@ -3,10 +3,20 @@ FastAPI application entrypoint.
 """
 from fastapi import FastAPI
 import socketio
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from chatty.core.database import create_tables
 from chatty.core.logging import configure_logging, get_logger
 from chatty.core.middleware import ErrorLoggingMiddleware, LoggingMiddleware
+from chatty.core.metrics import (
+    socketio_connections_total,
+    socketio_disconnections_total,
+    socketio_room_joins_total,
+    socketio_room_leaves_total,
+    socketio_errors_total,
+    socketio_active_connections,
+    socketio_room_members,
+)
 from chatty.routers import health, hello, users, chatrooms, messages, chatroom_participants
 
 # Configure logging
@@ -24,11 +34,15 @@ sio = socketio.AsyncServer(
 async def connect(sid, environ):
     """Handle client connection."""
     logger.info(f"Client {sid} connected")
+    socketio_connections_total.inc()
+    socketio_active_connections.inc()
 
 @sio.event
 async def disconnect(sid):
     """Handle client disconnection."""
     logger.info(f"Client {sid} disconnected")
+    socketio_disconnections_total.inc()
+    socketio_active_connections.dec()
 
 @sio.event
 async def join(sid, data):
@@ -36,18 +50,21 @@ async def join(sid, data):
     try:
         user_id = data.get('user_id')
         chatroom_id = data.get('chatroom_id')
-        
+
         if not user_id or not chatroom_id:
             await emit_error({'message': 'user_id and chatroom_id are required'}, sid)
             return
-        
+
         # Join the room using chatroom_id as the room identifier
         await sio.enter_room(sid, chatroom_id)
         logger.info(f"Client {sid} (user {user_id}) joined chatroom {chatroom_id}")
-        
+
+        socketio_room_joins_total.labels(room=chatroom_id).inc()
+        socketio_room_members.labels(room=chatroom_id).inc()
+
         # Acknowledge the join
         await sio.emit('joined', {'chatroom_id': chatroom_id}, room=sid)
-        
+
     except Exception as e:
         # TODO: Implement proper error handling for Socket.IO events
         logger.error(f"Error in join event: {e}")
@@ -59,18 +76,21 @@ async def leave(sid, data):
     try:
         user_id = data.get('user_id')
         chatroom_id = data.get('chatroom_id')
-        
+
         if not user_id or not chatroom_id:
             await emit_error({'message': 'user_id and chatroom_id are required'}, sid)
             return
-        
+
         # Leave the room
         await sio.leave_room(sid, chatroom_id)
         logger.info(f"Client {sid} (user {user_id}) left chatroom {chatroom_id}")
-        
+
+        socketio_room_leaves_total.labels(room=chatroom_id).inc()
+        socketio_room_members.labels(room=chatroom_id).dec()
+
         # Acknowledge the leave
-        await emit_left({'chatroom_id': chatroom_id}, sid)
-        
+        await sio.emit("left", payload, room=room)
+
     except Exception as e:
         # TODO: Implement proper error handling for Socket.IO events
         logger.error(f"Error in leave event: {e}")
@@ -78,6 +98,7 @@ async def leave(sid, data):
 
 # Socket.IO error helper
 async def emit_error(error_payload, room):
+    socketio_errors_total.inc()
     await sio.emit("error", error_payload, room=room)
 
 app = FastAPI(
@@ -90,17 +111,20 @@ app = FastAPI(
 app.add_middleware(ErrorLoggingMiddleware)
 app.add_middleware(LoggingMiddleware)
 
+# Instrument FastAPI with Prometheus — exposes /metrics
+Instrumentator().instrument(app).expose(app)
+
 # Create database tables on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize database tables on application startup."""
     logger.info("Starting up Chatty Backend application")
-    
+
     # Clean out existing database and create fresh tables
     from chatty.core.database import Base, engine
     Base.metadata.drop_all(bind=engine)  # Drop all existing tables
     logger.info("Existing database tables dropped")
-    
+
     create_tables()
     logger.info("Fresh database tables created successfully")
 
@@ -132,4 +156,3 @@ app.mount('/socket.io/', socketio_app)
 async def root() -> dict[str, str]:
     """Root endpoint."""
     return {"message": "Welcome to Chatty Backend!"}
-

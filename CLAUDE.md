@@ -73,8 +73,20 @@ This is a **FastAPI + Socket.IO** chat backend using SQLite (temporary/dev) and 
 - Routes: lowercase snake_case (e.g. `/chatroom-participants/{id}`)
 - Docstrings: Google style (not required but preferred)
 
+## Observability
+
+- `/metrics` — Prometheus endpoint (via `prometheus_fastapi_instrumentator`): request latency, count, error rate, request/response size
+- Custom Socket.IO metrics in `core/metrics.py` exposed through the same `/metrics` endpoint
+- `prometheus/prometheus.yml` — scrapes the backend at `chatty-backend:8000`
+- `grafana/provisioning/` — auto-provisions Prometheus datasource and dashboard loader
+- `grafana/dashboards/` — dashboard JSON files (FastAPI + Socket.IO)
+
+`make run` starts the full stack via `docker compose up --build`: backend on :8000, Prometheus on :9090, Grafana on :3000 (admin/admin).
+
 ## Directory conventions
 - `.github/` — GitHub Actions and workflows
 - `terraform/` — infrastructure as code
-- `app/` — all application code and Poetry config
-- `tests/` — test files (run from within `app/` directory via Poetry)
+- `app/` — all application code
+- `tests/` — test files
+- `prometheus/` — Prometheus configuration
+- `grafana/` — Grafana dashboards and provisioning

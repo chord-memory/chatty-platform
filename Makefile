@@ -6,8 +6,8 @@ TEST_IMAGE_NAME ?= chatty-backend-test
 build:
 	docker build -t $(IMAGE_NAME) .
 
-run: build
-	docker run --rm -p 8000:8000 --name $(IMAGE_NAME) $(IMAGE_NAME)
+run:
+	docker compose up --build
 
 test-build:
 	docker build -t $(TEST_IMAGE_NAME) -f Dockerfile.test .

@@ -10,15 +10,18 @@ Chatty Backend experimentation
 ## Run the app
 
 ```bash
-# Build the image chatty-backend:latest
-make build
-
-# Run the local server on http://localhost:8000
+# Start the full local environment (backend + Prometheus + Grafana)
 make run
-
-# To see lovely docs in your browser:
-# http://localhost:8000/docs
 ```
+
+| Service    | URL                          |
+|------------|------------------------------|
+| Backend    | http://localhost:8000        |
+| API docs   | http://localhost:8000/docs   |
+| Prometheus | http://localhost:9090        |
+| Grafana    | http://localhost:3000        |
+
+Grafana default login: **admin / admin**
 
 ## Run tests
 

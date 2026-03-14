@@ -1,0 +1,118 @@
+{
+  "title": "Socket.IO Observability",
+  "uid": "socketio-observability",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active Connections",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "socketio_active_connections",
+          "legendFormat": "Active"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 2,
+      "title": "Connections / sec",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "rate(socketio_connections_total[1m])",
+          "legendFormat": "conn/s"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 3,
+      "title": "Messages / sec",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(socketio_messages_total[1m]))",
+          "legendFormat": "msg/s"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 4,
+      "title": "Errors / sec",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "rate(socketio_errors_total[1m])",
+          "legendFormat": "err/s"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 5,
+      "title": "Connections over time",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "socketio_active_connections",
+          "legendFormat": "Active connections"
+        },
+        {
+          "expr": "rate(socketio_connections_total[1m])",
+          "legendFormat": "Connections/s"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Messages over time (by room)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(socketio_messages_total[1m])",
+          "legendFormat": "{{room}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Room joins & leaves",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(socketio_room_joins_total[1m])",
+          "legendFormat": "joins {{room}}"
+        },
+        {
+          "expr": "rate(socketio_room_leaves_total[1m])",
+          "legendFormat": "leaves {{room}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Room membership",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "socketio_room_members",
+          "legendFormat": "{{room}}"
+        }
+      ]
+    }
+  ]
+}
