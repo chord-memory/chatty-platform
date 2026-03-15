@@ -1,0 +1,178 @@
+Here is the review:                                                                                                                                     
+                                                                                                                                                          
+  ---                                                                                                                                                     
+  Prompt Review: ec2_poc_deploy.txt                                                                                                                       
+                                                                                                                                                          
+  ---                                                                                                                                                     
+  Questions that must be answered before implementation     
+
+  1. What domain name will be used? Caddy requires a real domain to provision TLS certificates via Let's Encrypt. Without this, HTTPS cannot work. Is the
+  domain already registered? Managed in Route53? Should Terraform create/manage the DNS record?
+  2. Who creates the Terraform remote state bucket? The spec requires an S3 backend with DynamoDB locking, but both must exist before terraform init can
+  run with a remote backend. This is a chicken-and-egg problem. Should a make bootstrap target handle this with a local backend first, then migrate?
+  3. Should the app routes be prefixed with /api? Currently the app has routes at /users, /chatrooms, /messages, etc. Caddy routing /api → chatty-backend
+  implies either Caddy strips the prefix (so the app never sees /api/), or the app needs new route prefixes. Which is it?
+  4. What GitHub organization/username owns the repository? Required for github.tf branch protection rules and the OIDC trust policy
+  (repo:<owner>/<repo>:*).
+  5. Is EC2 replacement acceptable for this POC? If terraform apply replaces the instance (e.g., due to user_data changes), containers stop and the
+  Elastic IP briefly detaches. Acceptable for POC, but needs to be explicit so it doesn't surprise anyone.
+
+  ---
+  Missing technical details that would block implementation
+
+  1. ECR repository — The deploy workflow pushes to ECR, but there is no ecr.tf in the Terraform file list and no ECR repo is provisioned. The full image
+  URI (including account ID and region) needs to be known before the compose file or user_data can reference it. Add ecr.tf.
+  2. DynamoDB table for TF state locking — Mentioned in the Remote State section but absent from the Terraform file list and variables. Add a
+  tf_lock_table_name variable and define the resource (likely in backend.tf).
+  3. Prometheus env var interpolation in YAML — The spec shows:
+  authorization:
+    credentials: ${API_KEY}
+  3. Prometheus does not support env var interpolation in its config file natively. The user_data script would need to run envsubst on the template before
+   docker compose up, or the config would need to be generated differently. This needs to be made explicit.
+  4. Grafana sub-path configuration — Running Grafana behind /grafana requires:
+  GF_SERVER_ROOT_URL=https://<domain>/grafana
+  GF_SERVER_SERVE_FROM_SUB_PATH=true
+  4. These env vars are not mentioned anywhere in the spec.
+  5. Prometheus sub-path configuration — Running Prometheus behind /prometheus requires:
+  --web.external-url=/prometheus
+  --web.route-prefix=/prometheus
+  5. Not mentioned.
+  6. How does docker-compose on EC2 know which image to pull? The compose file needs the full ECR URI (e.g.,
+  123456789.dkr.ecr.us-west-1.amazonaws.com/chatty-backend:latest). The spec doesn't say how this URI is embedded in the compose file that gets synced to
+  S3 — is it templated by Terraform? Hard-coded? An env var?
+  7. bcrypt hash generation for make run — The spec says make run should "generate and export PROMETHEUS_PASSWORD_HASH" from PROMETHEUS_PASSWORD, but
+  doesn't specify the tool. Caddy requires bcrypt specifically (caddy hash-password or htpasswd -nbB). Neither may be installed locally. This needs to be
+  pinned to a specific method.
+  8. PROMETHEUS_PASSWORD_HASH contains $ characters — bcrypt hashes look like $2a$14$.... In docker-compose env vars, $ must be escaped as $$. This is a
+  known footgun and needs to be handled explicitly in the Caddyfile and compose file.
+
+  ---
+  Ambiguous requirements
+
+  1. S3 bucket name inconsistency — The spec says "S3 bucket chatty" in the User Data section (aws s3 sync s3://chatty /srv/chatty) but
+  config_bucket_name=chatty-config in the variables. These conflict. Pick one.
+  2. make run conflict — make run currently means docker compose up --build (updated by the observability task). The spec redefines it to also hash the
+  Prometheus password first. This is fine but should be stated as a replacement, not an addition.
+  3. make deploy locally vs in CI — Locally, make deploy would use --profile jordan-sso. In CI, it would use OIDC-assumed role credentials from env vars.
+  The Makefile needs conditional logic or separate targets to handle this. Not addressed.
+  4. API_KEY authentication — The spec says the app requires X-API-Key header auth, but no such middleware exists in the current app. Is implementing this
+   middleware in scope for this prompt? It's implied but not stated.
+  5. CORS — The spec says CORS should depend on ENVIRONMENT. The Socket.IO server currently hardcodes cors_allowed_origins="*". Is updating the app code
+  in scope? Same question as above.
+  6. CloudWatch logging conditionally — The spec says "CloudWatch logs for all containers using awslogs driver when ENVIRONMENT=prod". A single
+  docker-compose.yml can't conditionally switch logging drivers. Recommend using a docker-compose.override.prod.yml pattern and making this explicit.
+  7. EBS re-attachment on instance replacement — EBS volumes are AZ-scoped. If Terraform replaces the EC2 instance, it needs to re-attach the same EBS
+  volume. The spec doesn't address this. If the EBS is destroyed and recreated, all /srv/chatty data is lost.
+
+  ---
+  Security concerns
+
+  1. Terraform state contains plaintext secrets — The spec has Terraform generate and store API_KEY, GRAFANA_ADMIN_PASSWORD, PROMETHEUS_PASSWORD, and
+  PROMETHEUS_PASSWORD_HASH in Parameter Store. These will also appear in Terraform state. The state S3 bucket must have server-side encryption and a
+  strict bucket policy. Recommend marking all secret outputs sensitive = true and enabling S3 bucket encryption in backend.tf.
+  2. terraform apply on every merge to master — If a Terraform change causes EC2 replacement, the running instance is destroyed. This could cause an
+  outage with no rollback path. Consider adding a lifecycle { prevent_destroy = true } on the EC2 instance and EBS resources, requiring explicit override
+  to replace them.
+  3. S3 bucket naming — chatty and chatty-config are almost certainly already taken (S3 names are globally unique). If terraform apply fails on bucket
+  creation after other resources are created, partial state is left behind. Use a suffix like the AWS account ID or a random string:
+  chatty-config-${data.aws_caller_identity.current.account_id}.
+  4. GitHub OIDC role scope — The spec says "attach policies allowing Terraform to manage the AWS resources required for this project" — this is
+  intentionally vague but needs to be pinned to specific services (EC2, VPC, IAM, S3, SSM, ECR, CloudWatch, DynamoDB) scoped to resources by tag or name
+  prefix. Overly broad policies here are a significant risk.
+  5. GITHUB_TOKEN in .env — This should be called out explicitly as never to be committed. Confirm .gitignore includes .env. The README should include a
+  warning.
+
+  ---
+  Idempotency issues
+
+  1. latest image tag is not idempotent — Deploying :latest means terraform apply won't trigger a container restart when a new image is pushed (the tag
+  hasn't changed from Terraform's perspective). The spec correctly says to also tag with the git commit hash and push both. But user_data pulling latest
+  on first boot is fine — the issue is subsequent deploys. Clarify how EC2 picks up new images: does terraform apply force instance replacement, or is
+  there a separate docker compose pull && docker compose up -d step via SSM?
+  2. EBS mount in user_data — The EBS mount script must check whether the volume is already formatted before running mkfs, otherwise it will destroy data
+  on instance reboot or re-run. This needs an explicit if ! blkid <device>; then mkfs...; fi guard.
+  3. Terraform-generated random passwords — If Terraform uses random_password resources to generate secrets, re-running terraform apply on a fresh state
+  would generate new passwords, rotating secrets unexpectedly. Use lifecycle { ignore_changes = [result] } on random resources.
+
+  ---
+  IAM least-privilege gaps
+
+  1. EC2 instance role needs to be scoped to:
+    - s3:GetObject + s3:ListBucket on the config bucket only (not s3:*)
+    - ssm:GetParameter on arn:aws:ssm:<region>:<account>:parameter/chatty/* only
+    - logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents scoped to a log group prefix
+    - ECR read permissions scoped to the specific repository
+    - ssm:StartSession is on the SSM service side; the instance needs AmazonSSMManagedInstanceCore (this is the standard managed policy — confirm this is
+  used)
+  2. GitHub OIDC role — Specify explicitly. At minimum: EC2, VPC, IAM (with boundary), S3, ECR, SSM Parameter Store, CloudWatch Logs, DynamoDB. IAM
+  permissions in particular should be bounded — full iam:* would allow privilege escalation.
+
+  ---
+  Unnecessary cost risks
+
+  1. CloudWatch Logs ingestion — At $0.50/GB, running generate_traffic.py in prod mode against a verbose app will generate log costs quickly. Recommend
+  adding a log retention policy (e.g., 7 days) and noting this in the README.
+  2. Elastic IP when instance is stopped — An unattached Elastic IP costs ~$0.005/hr. If the EC2 instance is stopped (not terminated), the EIP incurs
+  charges. Add a note to the README.
+  3. Two S3 buckets — The TF state bucket and config bucket both incur costs (minimal, but worth noting).
+
+  ---
+  Suggested simplifications
+
+  1. Split bootstrap from deploy — Add a make bootstrap target that creates only the S3 TF state bucket and DynamoDB lock table using a local backend. All
+   other infra goes through the normal make deploy. This resolves the chicken-and-egg problem cleanly.
+  2. Separate infra deploy from app deploy — terraform apply for infrastructure changes (VPC, EC2, IAM) and docker compose pull + up for app changes (new
+  image) are very different risk profiles. Consider a make deploy-infra (Terraform) vs make deploy-app (SSM run-command to pull and restart containers)
+  split. This avoids triggering EC2 replacement just to ship a new image.
+  3. Two compose files instead of conditional logging — Use docker-compose.yml (local, no CloudWatch) and docker-compose.prod.yml (override with awslogs
+  driver). make run uses the base; user_data uses docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d. This is standard Docker Compose
+  practice and avoids awkward conditionals.
+  4. generate_traffic.py scope — Consider limiting initial scope to HTTP-only (REST endpoints) and adding WebSocket simulation as a follow-up. WebSocket
+  simulation with python-socketio client adds significant complexity for a first pass.
+
+  ---
+  Bootstrapping gap
+
+  The spec's bootstrapping section says to run make deploy locally to create the OIDC provider, GitHub Actions role, and initialize remote state. But make
+   deploy also pushes a Docker image to ECR and runs terraform apply for all resources — including the EC2 instance. On first run, the ECR repo doesn't
+  exist yet, and make deploy would fail at the image push step before Terraform even runs.
+
+  Recommended bootstrap sequence:
+  1. make bootstrap — creates TF state S3 bucket + DynamoDB table with local backend only
+  2. terraform init with remote backend (migrate state)
+  3. make deploy — creates all remaining infra including ECR, then pushes image
+
+  This sequence needs to be explicit in the spec.
+
+  ---
+  Summary of items requiring resolution before implementation
+
+  ┌─────┬────────────────────────────────────────────────┬─────────────┐
+  │  #  │                      Item                      │  Blocking?  │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 1   │ Domain name for Caddy TLS                      │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 2   │ TF state bootstrapping strategy                │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 3   │ /api prefix — strip or add to app?             │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 4   │ GitHub org/username for OIDC and github.tf     │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 5   │ ECR repo added to Terraform                    │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 6   │ Prometheus env var interpolation approach      │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 7   │ bcrypt hash generation method for local dev    │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 8   │ Docker image URI in compose on EC2             │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 9   │ Grafana + Prometheus sub-path config           │ Yes         │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 10  │ EC2 replacement strategy for new image deploys │ Recommended │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 11  │ S3 bucket naming strategy (global uniqueness)  │ Recommended │
+  ├─────┼────────────────────────────────────────────────┼─────────────┤
+  │ 12  │ CloudWatch conditional logging approach        │ Recommended │
+  └─────┴────────────────────────────────────────────────┴─────────────┘
+
+✻ Crunched for 2m 5s

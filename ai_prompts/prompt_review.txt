@@ -1,0 +1,19 @@
+Please review the following implementation specification: ai_prompts/ec2_poc_deploy.txt
+
+Goals:
+1. Identify any ambiguous or unclear requirements
+2. Identify missing technical details that would block implementation
+3. Suggest edits to improve clarity and determinism
+4. Suggest simplifications where possible
+5. Ask any questions that must be answered before implementation
+6. Identify any steps that could accidentally destroy infrastructure or create security issues
+7. Confirm that the proposed infrastructure will be fully idempotent with Terraform
+8. Ensure all IAM roles follow least-privilege principles
+9. Identify any components that may create unnecessary AWS cost
+10. Confirm the bootstrapping and validation steps will be sufficient
+11. Prefer simple and deterministic implementations over complex ones
+
+Do NOT implement anything yet. Only review and suggest improvements.
+
+Any improvements should be made to the specification file directly.
+Please output a summary of changes made and reasoning for each change.
