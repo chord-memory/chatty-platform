@@ -1,0 +1,330 @@
+Deploy a secure production POC in AWS for a FastAPI + Socket.IO backend using Docker Compose on EC2 with Caddy, Prometheus, Grafana, Terraform, GitHub Actions, and AWS Parameter Store.
+
+Goals
+-----
+
+1. Run 4 containers on a single EC2 instance with docker-compose:
+   - FastAPI + Socket.IO app
+   - Prometheus
+   - Grafana
+   - Caddy (HTTPS reverse proxy)
+2. Secure all services:
+   - Prometheus: basic auth via Caddy (hashed password from Parameter Store)
+   - Grafana: admin password from Parameter Store
+   - App: API_KEY header authentication
+3. Allow local development with test credentials in .env and CORS enabled
+4. Support prod deployment with secrets in Parameter Store, CORS disabled, no browser access to app
+5. Use Terraform to create infrastructure including EC2, VPC, EBS, S3, IAM, security groups, Elastic IP, Parameter Store secrets
+6. Provide GitHub Actions CI/CD:
+   - PR workflow for `make test-all` to ensure tests pass before merging to master
+   - Merge to master wokflow for `make deploy` that builds and pushes image and runs Terraform
+   - Use GitHub OIDC to authenticate with AWS
+7. Provide Makefile commands to:
+    - login via AWS SSO
+    - SSM access to EC2
+    - retrieve EC2 public IP & instance ID
+    - fetch secrets
+    - deploy workflow that builds and pushes image and runs Terraform
+8. Enable CloudWatch logs for all prod containers
+9. Include a Python `generate_traffic.py` script for simulating activity
+
+Architecture
+------------
+
+Internet
+  |
+  v
+Caddy (HTTPS entrypoint)
+  |
+  ├ /api        -> app container
+  ├ /grafana    -> grafana container
+  └ /prometheus -> prometheus container (protected with basic auth)
+
+Ports:
+- Expose only 80/443 publicly
+- EC2 uses static Elastic IP
+- No SSH; SSM-only access
+
+Secrets
+-------
+
+Terraform generates and stores in Parameter Store:
+
+- `/chatty/API_KEY`
+- `/chatty/GRAFANA_ADMIN_PASSWORD`
+- `/chatty/PROMETHEUS_PASSWORD`
+- `/chatty/PROMETHEUS_PASSWORD_HASH` (bcrypt hash for Caddy)
+
+Local dev `.env` file (ignored in git):
+
+ENVIRONMENT=local
+AWS_PROFILE=jordan-sso
+API_KEY=test123
+GRAFANA_ADMIN_PASSWORD=test123
+PROMETHEUS_PASSWORD=test123
+EC2_INSTANCE_ID=i-xxxxxxxx
+GITHUB_TOKEN=ghp_xxxxx
+
+The `.env` file should be sourced in the Makefile
+
+
+Terraform
+---------
+
+Directory structure:
+
+terraform/
+  - provider.tf
+  - variables.tf
+  - vpc.tf
+  - ec2.tf
+  - ebs.tf
+  - s3.tf
+  - iam.tf
+  - security.tf
+  - secrets.tf
+  - outputs.tf
+  - user_data.sh.tpl
+  - github.tf (details in GitHub section below)
+  - backend.tf (details in GitHub section below)
+
+Terraform provisions:
+
+- VPC with public subnet, internet gateway, route tables to host EC2
+- EC2 Ubuntu t3.micro
+- EBS volume mounted at `/srv/chatty`
+- S3 bucket `chatty` storing configs (docker-compose.yml, Caddyfile, Prometheus config, Grafana config)
+- IAM roles and policies for EC2 SSM and GitHub OIDC (details in GitHub section below)
+- Parameter Store secrets for app, Grafana, Prometheus
+- Elastic IP
+- Terraform variables with defaults:
+    - region=us-west-1
+    - profile=jordan-sso
+    - image_name=chatty-backend
+    - config_bucket_name=chatty-config
+    - config_bucket_size_gb=1
+    - tf_bucket_name=chatty-terraform
+    - tf_bucket_size_gb=1
+    - ec2_size=t3.micro
+- Terraform outputs: EC2 public IP, EC2 instance ID
+
+User Data
+---------
+
+- Install docker, docker compose, awscli
+- Mount EBS volume at `/srv/chatty`
+- Sync configuration from S3:
+
+aws s3 sync s3://chatty /srv/chatty
+
+- Fetch secrets from Parameter Store and export as env vars:
+- API_KEY
+- GRAFANA_ADMIN_PASSWORD
+- PROMETHEUS_PASSWORD_HASH
+
+- Also export ENVIRONMENT=prod
+- Run docker compose up
+
+Docker Compose
+--------------
+
+Existing containers: chatty-backend, prometheus, grafana
+
+Add Caddy container:
+- HTTPS termination
+- Routing:
+  - /api → chatty-backend
+  - /grafana → grafana
+  - /prometheus → prometheus (basic auth with bcrypt hash from env)
+
+Authentication
+--------------
+
+Prometheus:
+- Scrape app metrics endpoint
+- Include API_KEY header:
+  ```
+  authorization:
+    credentials: ${API_KEY}
+  ```
+- Secured via caddy with bcrypt hash
+
+Grafana:
+- Connect to Prometheus via Docker network: `http://prometheus:9090`
+- Configure admin password from env
+
+App:
+- Requires `X-API-Key` header
+- CORS depends on ENVIRONMENT:
+  - local → "*"
+  - prod → empty
+
+Logs
+----
+
+- CloudWatch logs for all containers using `awslogs` driver when ENVIRONMENT=prod
+
+Caddy
+-----
+
+- Use environment variable interpolation for Prometheus password hash
+- Protect `/prometheus` with basic auth
+- Terminate HTTPS for all services
+- Route `/grafana` and `/api` and `/prometheus` accordingly
+
+Scripts
+-------
+
+`./scripts/generate_traffic.py`
+
+- Simulate chat rooms, messages, WebSocket connections
+- Options:
+
+--env local
+--env prod
+
+- Local mode: read API_KEY from `.env`
+- Prod mode: read API_KEY from Parameter Store
+
+Makefile
+--------
+
+- `make login` → AWS SSO login for profile in `.env`
+- `make plan` → execute `terraform plan`
+- `make deploy` → see details in "Deploy workflow" in CI/CD section below
+- `make get-ec2` → retrieve EC2 public IP and instance ID using AWS CLI via profile
+- `make get-secrets` → fetch API_KEY, Grafana password, Prometheus password from Parameter Store
+- `make ec2-ssh` →  `aws ssm start-session --target $EC2_INSTANCE_ID` 
+- `make run` → generate and export PROMETHEUS_PASSWORD_HASH based on PROMETHEUS_PASSWORD in `.env` before `docker compose up`
+
+CI/CD (GitHub Actions)
+----------------------
+
+1. PR workflow
+ - Trigger: pull_request to master
+ - Run: `make test-all`
+ - Required check for merging
+ - Run: `make plan`
+ - So Terraform infrastructure changes may be visualized
+
+2. Deploy workflow
+ - Trigger: push to master
+ - Run: `make deploy`
+ - `make deploy` should depend on `test-all`
+ - So first run: `make test-all`
+ - Required check for continuing
+ - `make deploy` should also depend on `make build`
+ - So next run: `make build`
+ - `make deploy` should then →
+ - Tag image: `latest` as is tagged by default + short git commit hash
+ - Push to ECR (both tags)
+ - Run `terraform apply`
+ - Use GitHub OIDC to assume AWS IAM role
+
+Add `workflow_dispatch` so the workflows can also be triggered manually for testing
+
+GitHub Extras
+-------------
+
+1. GitHub → AWS Authentication for Terraform deploy
+- Create an AWS IAM OIDC provider for GitHub (`token.actions.githubusercontent.com`) via Terraform
+- Configure AWS to trust GitHub’s OIDC identity provider
+- Create an IAM role that GitHub Actions can assume to run Terraform deploys
+- Restrict the role trust policy to this specific repository (any branch)
+- Attach policies allowing Terraform to manage the AWS resources required for this project
+- This role and trust policy should be defined in `iam.tf`
+
+2. GitHub Terraform Provider
+- Create a `github.tf` file in the `./terraform` directory using the Terraform GitHub provider to manage repository rules:
+    - Require pull requests to merge into `master` (prevent direct pushes)
+    - Require status checks so the test workflow must pass before a PR can merge
+    - Enforce admins so even repository admins cannot bypass the rules
+
+3. Terraform Remote State
+- Configure Terraform remote state using an S3 backend with DynamoDB state locking
+- This ensures local Terraform runs and GitHub workflow deploys share the same state
+- Terraform state should be stored in S3 and locked using a DynamoDB table to prevent concurrent modifications
+
+
+README
+------
+
+Include instructions for:
+
+- Running new `make` commands
+- Running `generate_traffic.py` in local or prod
+- Accessing local/prod Grafana and Prometheus
+- Accessing CloudWatch logs for prod containers
+- Generating .env file for development
+
+
+CLAUDE.md & .cursor_rules
+-------------------------
+
+Update these files based on the relevant changes made
+
+
+Post-Execution
+--------------
+
+At the end, output two sections:
+
+Bootstrapping
+- exact commands I must run
+
+Validation
+- steps to verify the system works
+
+See Bootstrapping and Validtion sections below for basic expected guidelines
+
+
+Bootstrapping
+-------------
+
+The following steps must be performed once locally to initialize the system.
+
+- Create a GitHub Personal Access Token with repo admin permissions for the Terraform GitHub provider
+- Run `make login` to authenticate with AWS via SSO
+- Run `make deploy` locally to:
+  - Create the AWS IAM OIDC provider
+  - Create the GitHub Actions IAM role and policies
+  - Configure GitHub branch protection rules via Terraform
+  - Initialize Terraform remote state
+
+Provide clear step-by-step instructions for completing these bootstrap actions.
+
+
+Validating
+----------
+
+After bootstrapping, validate the full system:
+
+1. Open a pull request into `master`
+   - Confirm the test workflow runs automatically
+   - Confirm the terraform plan is visible
+   - Confirm the PR cannot merge until tests pass
+
+2. Merge the PR after tests succeed
+   - Confirm the deploy workflow runs automatically
+   - Confirm the GitHub workflow successfully assumes the AWS role via OIDC
+   - Confirm `terraform apply` executes successfully
+
+3. Verify observability and runtime behavior
+
+Run locally:
+
+`./generate_traffic.py --env=local`
+
+Run against the deployed environment:
+
+`./generate_traffic.py --env=prod`
+
+Confirm:
+
+- Prometheus metrics appear
+- Grafana dashboards populate
+- CloudWatch container logs appear for the production deployment
+
+
+
+
