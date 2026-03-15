@@ -36,17 +36,35 @@ make test-smoke
 make test-all
 ```
 
-# To Do / To Discuss:
-- dockerize
-- basic github actions
+## Project Status
+
+### Completed
+
+- Dockerize (app & test runtimes)
+- Makefile (for local & GitHub use)
 - OpenAPI spec generation
-- CORS approach
-- infra as code approach, incl implied terraform dependency graph
-- CI/CD approach
-- auth/authz approach
-- db migration instrumentation
-- config / env var management
-- exposing service to front-end layer
-- auto scaling, load testing, etc..
-- cloud spend management
-- general SDLC at this stage of maturity
+- Observability pipeline (Prometheus + Grafana + docker-compose, FastAPI & Socket.IO metrics, dashboards)
+
+### In Progress (EC2 production POC)
+
+- IaC (Terraform: VPC, EC2, EBS, S3, IAM, Parameter Store, Elastic IP)
+- GitHub CI/CD (PR: test-all + plan; deploy: build, push ECR, terraform apply via OIDC)
+- GitHub restrictions (branch protection, require PRs & status checks via Terraform)
+- Auth (API_KEY for app; basic auth for Prometheus; Grafana admin from secrets)
+- CORS approach (local vs prod)
+- Secrets management (Parameter Store in prod, .env locally)
+- Caddy reverse proxy (HTTPS, /api, /grafana, /prometheus)
+- Traffic generation script to validate (`generate_traffic.py` for local/prod)
+- CloudWatch logs for prod containers
+
+### To Do
+
+- Add a DB migration tool (e.g. Alembic) for schema changes
+- Migrate from SQLite to managed RDS for persistence
+- Auto-scaling and load balancing
+- Rolling deployments (zero-downtime releases)
+- Cloud cost visibility and overview
+- Operational alerting on API metrics, infrastructure health, and deployment failures (thresholds + notifications)
+- User-based auth for the app (e.g. for a future frontend; current API_KEY header is service-level only)
+- API versioning (e.g. /api/v1/...) for backward-compatible changes
+- Client for the API (browser app, native app, or CLI — TBD)
